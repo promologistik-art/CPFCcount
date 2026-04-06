@@ -71,7 +71,7 @@ async def set_bot_commands():
         BotCommand(command="profile_edit", description="Изменить профиль"),
         BotCommand(command="subscription", description="Статус подписки"),
         BotCommand(command="help", description="Помощь"),
-        BotCommand(command="admin_panel", description="🔧 Админ-панель"),
+        BotCommand(command="admin_panel", description="Админ-панель"),
     ]
     await bot.set_my_commands(commands)
 
@@ -144,7 +144,7 @@ async def get_user_id_or_username(user_input: str) -> int:
 
 # ============ АДМИН-ПАНЕЛЬ ============
 
-@dp.message(Command("admin_panel"))
+@dp.message(Command("admin_panel", "adminpanel"))
 async def cmd_admin_panel(message: types.Message):
     """Показывает админ-панель (только для админа)"""
     if not is_admin(message.from_user.id, message.from_user.username):
@@ -152,20 +152,20 @@ async def cmd_admin_panel(message: types.Message):
         return
     
     admin_text = (
-        "🔧 *Админ-панель*\n\n"
+        "🔧 Админ-панель\n\n"
         "/admin_users — список пользователей\n"
         "/admin_info user_id или @username — информация о пользователе\n"
         "/admin_add_user — добавить пользователя\n"
         "/admin_extend user_id или @username days — продлить подписку\n"
         "/admin_remove_user user_id или @username — удалить пользователя\n"
         "/admin_activate user_id или @username [days] — активация подписки\n\n"
-        "*Реферальные команды:*\n"
+        "Реферальные команды:\n"
         "/ref @username процент месяцы — создать реферальную ссылку\n"
         "/ref_stats — статистика по рефералам\n"
         "/ref_link_info код — информация о ссылке"
     )
     
-    await message.answer(admin_text, parse_mode="Markdown")
+    await message.answer(admin_text)
 
 # ============ АДМИНСКИЕ КОМАНДЫ ============
 
@@ -364,7 +364,7 @@ async def cmd_admin_info(message: types.Message):
             text += f"Тестовый период: до {sub['trial_end']}\n"
         
         ref_stats = user_info.get('referral_stats', {})
-        text += f"\n📊 Реферальная статистика:\n"
+        text += f"\nРеферальная статистика:\n"
         text += f"   Привёл: {ref_stats.get('total_refs', 0)} пользователей\n"
         text += f"   Оплатили: {ref_stats.get('paid_refs', 0)}\n"
         text += f"   Сумма к выплате: {ref_stats.get('total_commission', 0):.0f} ₽"
@@ -501,7 +501,7 @@ async def cmd_ref_stats(message: types.Message):
         await message.answer("Нет реферальных ссылок")
         return
     
-    text = "📊 Статистика рефералов:\n\n"
+    text = "Статистика рефералов:\n\n"
     total_refs = 0
     total_paid = 0
     total_commission = 0
@@ -545,13 +545,13 @@ async def cmd_ref_link_info(message: types.Message):
     username = f"@{info['username']}" if info['username'] else info['first_name']
     bot_info = await bot.get_me()
     
-    text = f"📋 Информация о реферальной ссылке\n\n"
-    text += f"🔗 Ссылка: https://t.me/{bot_info.username}?start={code}\n"
-    text += f"👤 Реферал: {username}\n"
-    text += f"💰 Комиссия: {info['commission_percent']}%\n"
-    text += f"🎁 Бонус рефералу: {info['bonus_months']} мес\n"
-    text += f"📅 Создана: {info['created_at'][:10]}\n"
-    text += f"📊 Статистика:\n"
+    text = f"Информация о реферальной ссылке\n\n"
+    text += f"Ссылка: https://t.me/{bot_info.username}?start={code}\n"
+    text += f"Реферал: {username}\n"
+    text += f"Комиссия: {info['commission_percent']}%\n"
+    text += f"Бонус рефералу: {info['bonus_months']} мес\n"
+    text += f"Создана: {info['created_at'][:10]}\n"
+    text += f"Статистика:\n"
     text += f"   Переходов: {info['total_refs']}\n"
     text += f"   Оплатили: {info['paid_refs']}"
     
@@ -720,7 +720,7 @@ async def cmd_help(message: types.Message):
         "яичница 4 яйца\n"
         "гречка 200г, курица 150\n\n"
         f"Связаться с админом: {ADMIN_CONTACT}\n\n"
-        "🔧 Администраторам: /admin_panel"
+        "Администраторам: /admin_panel"
     )
     
     await message.answer(help_text)
