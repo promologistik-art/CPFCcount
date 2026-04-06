@@ -71,6 +71,7 @@ async def set_bot_commands():
         BotCommand(command="profile_edit", description="Изменить профиль"),
         BotCommand(command="subscription", description="Статус подписки"),
         BotCommand(command="help", description="Помощь"),
+        BotCommand(command="admin_panel", description="🔧 Админ-панель"),
     ]
     await bot.set_my_commands(commands)
 
@@ -140,6 +141,31 @@ async def get_user_id_or_username(user_input: str) -> int:
         return int(user_input)
     else:
         return user_db.get_user_id_by_username(user_input)
+
+# ============ АДМИН-ПАНЕЛЬ ============
+
+@dp.message(Command("admin_panel"))
+async def cmd_admin_panel(message: types.Message):
+    """Показывает админ-панель (только для админа)"""
+    if not is_admin(message.from_user.id, message.from_user.username):
+        await message.answer("⛔ Нет доступа")
+        return
+    
+    admin_text = (
+        "🔧 *Админ-панель*\n\n"
+        "/admin_users — список пользователей\n"
+        "/admin_info user_id или @username — информация о пользователе\n"
+        "/admin_add_user — добавить пользователя\n"
+        "/admin_extend user_id или @username days — продлить подписку\n"
+        "/admin_remove_user user_id или @username — удалить пользователя\n"
+        "/admin_activate user_id или @username [days] — активация подписки\n\n"
+        "*Реферальные команды:*\n"
+        "/ref @username процент месяцы — создать реферальную ссылку\n"
+        "/ref_stats — статистика по рефералам\n"
+        "/ref_link_info код — информация о ссылке"
+    )
+    
+    await message.answer(admin_text, parse_mode="Markdown")
 
 # ============ АДМИНСКИЕ КОМАНДЫ ============
 
@@ -693,23 +719,11 @@ async def cmd_help(message: types.Message):
         "борщ 400г\n"
         "яичница 4 яйца\n"
         "гречка 200г, курица 150\n\n"
-        f"Связаться с админом: {ADMIN_CONTACT}"
+        f"Связаться с админом: {ADMIN_CONTACT}\n\n"
+        "🔧 Администраторам: /admin_panel"
     )
     
-    if is_admin(message.from_user.id, message.from_user.username):
-        help_text += "\n\n*Админ-команды:*\n"
-        help_text += "/admin_users — список пользователей\n"
-        help_text += "/admin_info user_id или @username — информация о пользователе\n"
-        help_text += "/admin_add_user — добавить пользователя\n"
-        help_text += "/admin_extend user_id или @username days — продлить подписку\n"
-        help_text += "/admin_remove_user user_id или @username — удалить пользователя\n"
-        help_text += "/admin_activate user_id или @username [days] — активация подписки\n\n"
-        help_text += "*Реферальные команды:*\n"
-        help_text += "/ref @username процент месяцы — создать реферальную ссылку\n"
-        help_text += "/ref_stats — статистика по рефералам\n"
-        help_text += "/ref_link_info код — информация о ссылке"
-    
-    await message.answer(help_text, parse_mode="Markdown")
+    await message.answer(help_text)
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
