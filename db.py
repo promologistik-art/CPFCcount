@@ -135,7 +135,6 @@ class UserDB:
                     link_code = referral_code
                     extra_days = REFERRAL_BONUS_DAYS
                     
-                    # Если referrer_id временный (отрицательный), пробуем найти реального пользователя
                     if referrer_id and referrer_id < 0 and referrer_username:
                         cursor.execute("SELECT user_id FROM users WHERE LOWER(username) = ?", (referrer_username.lower(),))
                         real_user = cursor.fetchone()
@@ -143,16 +142,14 @@ class UserDB:
                             referrer_id = real_user[0]
                             cursor.execute("UPDATE referral_links SET referrer_id = ? WHERE code = ?", (referrer_id, referral_code))
                     
-                    # Сохраняем запись о реферале
                     if referrer_id and referrer_id > 0:
                         cursor.execute('''
                             INSERT INTO referrals (referrer_id, referee_id, link_code)
                             VALUES (?, ?, ?)
                         ''', (referrer_id, user_id, link_code))
                         
-                        # Добавляем бонусные месяцы рефереру
                         if bonus_months and bonus_months > 0:
-                            self._add_bonus_months_to_user(referrer_id, bonus_months)
+                            self._add_bonus_months_to_user(referrer_id, bonus_months))
             
             trial_end = (datetime.now() + timedelta(days=TRIAL_DAYS + extra_days)).date().isoformat()
             cursor.execute(
@@ -165,7 +162,6 @@ class UserDB:
         return user, is_new
     
     def _add_bonus_months_to_user(self, user_id: int, months: int):
-        """Добавляет бонусные месяцы к подписке пользователя"""
         cursor = self.conn.cursor()
         cursor.execute("SELECT paid_until, trial_end FROM subscriptions WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
@@ -198,10 +194,7 @@ class UserDB:
         return row[0] if row else None
     
     def generate_referral_link(self, username: str, commission_percent: int, bonus_months: int) -> str:
-        """Генерирует реферальную ссылку по username (без проверки существования пользователя)"""
         cursor = self.conn.cursor()
-        
-        # Временный отрицательный ID, пока пользователь не запустит бота
         temp_id = -abs(hash(username)) % 1000000
         
         while True:
@@ -217,6 +210,26 @@ class UserDB:
         self.conn.commit()
         
         return code
+    
+    def get_all_user_ids(self) -> List[int]:
+        """Получает список всех user_id для рассылки"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT user_id FROM users")
+        rows = cursor.fetchall()
+        return [row[0] for row in rows]
+    
+    def get_active_user_ids(self) -> List[int]:
+        """Получает список пользователей с активной подпиской"""
+        cursor = self.conn.cursor()
+        today = date.today().isoformat()
+        cursor.execute('''
+            SELECT user_id FROM subscriptions 
+            WHERE is_forever = 1 
+            OR (paid_until IS NOT NULL AND paid_until >= ?)
+            OR (trial_end IS NOT NULL AND trial_end >= ?)
+        ''', (today, today))
+        rows = cursor.fetchall()
+        return [row[0] for row in rows]
     
     def get_referral_stats(self) -> List[Dict]:
         cursor = self.conn.cursor()

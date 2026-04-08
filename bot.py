@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import re
+import io
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -35,6 +36,7 @@ class AdminState(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_days = State()
     waiting_for_days_value = State()
+    waiting_for_broadcast = State()  # новое состояние для рассылки
 
 # ============ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ============
 
@@ -146,19 +148,23 @@ async def get_user_id_or_username(user_input: str) -> int:
 
 @dp.message(Command("admin_panel", "adminpanel"))
 async def cmd_admin_panel(message: types.Message):
-    """Показывает админ-панель (только для админа)"""
     if not is_admin(message.from_user.id, message.from_user.username):
-        await message.answer("⛔ Нет доступа")
+        await message.answer("Нет доступа")
         return
     
     admin_text = (
-        "🔧 Админ-панель\n\n"
+        "Админ-панель\n\n"
         "/admin_users — список пользователей\n"
         "/admin_info user_id или @username — информация о пользователе\n"
         "/admin_add_user — добавить пользователя\n"
         "/admin_extend user_id или @username days — продлить подписку\n"
         "/admin_remove_user user_id или @username — удалить пользователя\n"
         "/admin_activate user_id или @username [days] — активация подписки\n\n"
+        "Рассылка:\n"
+        "/broadcast_all текст — рассылка всем пользователям\n"
+        "/broadcast_active текст — рассылка только активным\n\n"
+        "Бэкап:\n"
+        "/backup — скачать базу данных users.db\n\n"
         "Реферальные команды:\n"
         "/ref @username процент месяцы — создать реферальную ссылку\n"
         "/ref_stats — статистика по рефералам\n"
@@ -166,6 +172,115 @@ async def cmd_admin_panel(message: types.Message):
     )
     
     await message.answer(admin_text)
+
+# ============ БЭКАП ============
+
+@dp.message(Command("backup"))
+async def cmd_backup(message: types.Message):
+    if not is_admin(message.from_user.id, message.from_user.username):
+        await message.answer("Нет доступа")
+        return
+    
+    try:
+        from config import USER_DB_PATH
+        
+        with open(USER_DB_PATH, 'rb') as f:
+            file_data = f.read()
+        
+        file_io = io.BytesIO(file_data)
+        file_io.name = "users.db"
+        
+        await message.answer_document(
+            document=types.BufferedInputFile(file_data, filename="users.db"),
+            caption="Бэкап базы данных users.db"
+        )
+        
+    except Exception as e:
+        await message.answer(f"Ошибка при создании бэкапа: {e}")
+
+# ============ РАССЫЛКА ============
+
+@dp.message(Command("broadcast_all"))
+async def cmd_broadcast_all(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id, message.from_user.username):
+        await message.answer("Нет доступа")
+        return
+    
+    text = message.text.replace("/broadcast_all", "").strip()
+    if not text:
+        await message.answer("Использование: /broadcast_all текст сообщения")
+        return
+    
+    users = user_db.get_all_user_ids()
+    await state.update_data(broadcast_text=text, broadcast_users=users, broadcast_type="всем")
+    
+    await message.answer(
+        f"Подтвердите рассылку.\n\n"
+        f"Получателей: {len(users)}\n"
+        f"Текст: {text[:200]}{'...' if len(text) > 200 else ''}\n\n"
+        f"Отправьте ДА для подтверждения или НЕТ для отмены"
+    )
+    await state.set_state(AdminState.waiting_for_broadcast)
+
+@dp.message(Command("broadcast_active"))
+async def cmd_broadcast_active(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id, message.from_user.username):
+        await message.answer("Нет доступа")
+        return
+    
+    text = message.text.replace("/broadcast_active", "").strip()
+    if not text:
+        await message.answer("Использование: /broadcast_active текст сообщения")
+        return
+    
+    users = user_db.get_active_user_ids()
+    await state.update_data(broadcast_text=text, broadcast_users=users, broadcast_type="активным")
+    
+    await message.answer(
+        f"Подтвердите рассылку.\n\n"
+        f"Получателей: {len(users)}\n"
+        f"Текст: {text[:200]}{'...' if len(text) > 200 else ''}\n\n"
+        f"Отправьте ДА для подтверждения или НЕТ для отмены"
+    )
+    await state.set_state(AdminState.waiting_for_broadcast)
+
+@dp.message(AdminState.waiting_for_broadcast)
+async def process_broadcast(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id, message.from_user.username):
+        await message.answer("Нет доступа")
+        await state.clear()
+        return
+    
+    if is_affirmative(message.text.lower()):
+        data = await state.get_data()
+        text = data.get("broadcast_text")
+        users = data.get("broadcast_users")
+        broadcast_type = data.get("broadcast_type")
+        
+        await message.answer(f"Начинаю рассылку для {len(users)} пользователей...")
+        
+        success = 0
+        failed = 0
+        
+        for user_id in users:
+            try:
+                await bot.send_message(user_id, text)
+                success += 1
+            except Exception as e:
+                failed += 1
+                logging.error(f"Ошибка отправки {user_id}: {e}")
+            
+            await asyncio.sleep(0.05)  # пауза, чтобы не забанили
+        
+        await message.answer(
+            f"Рассылка завершена.\n"
+            f"Успешно: {success}\n"
+            f"Ошибок: {failed}"
+        )
+        await state.clear()
+    else:
+        await message.answer("Рассылка отменена")
+        await state.clear()
 
 # ============ АДМИНСКИЕ КОМАНДЫ ============
 
@@ -479,14 +594,14 @@ async def cmd_create_referral(message: types.Message):
     link = f"https://t.me/{bot_info.username}?start={code}"
     
     await message.answer(
-        f"✅ Реферальная ссылка создана для @{username}\n\n"
-        f"🔗 Ссылка: {link}\n\n"
-        f"📊 Условия:\n"
+        f"Реферальная ссылка создана для @{username}\n\n"
+        f"Ссылка: {link}\n\n"
+        f"Условия:\n"
         f"• Комиссия: {commission_percent}% от оплат\n"
         f"• Бонус рефералу: {bonus_months} месяц(ев) бесплатной подписки\n\n"
         f"При переходе по ссылке новый пользователь получит +3 дня к тестовому периоду.\n"
         f"При оплате подписки рефералу начислится комиссия.\n\n"
-        f"⚠️ Пользователь @{username} получит бонусные месяцы после первого запуска бота."
+        f"Пользователь @{username} получит бонусные месяцы после первого запуска бота."
     )
 
 @dp.message(Command("ref_stats"))
@@ -570,21 +685,21 @@ async def cmd_profile(message: types.Message, state: FSMContext):
         gender_text = "Мужской" if profile["gender"] == "male" else "Женский"
         
         await message.answer(
-            f"📋 Ваш профиль\n\n"
-            f"👤 Имя: {profile['name']}\n"
-            f"⚖️ Вес: {profile['weight']} кг\n"
-            f"📏 Рост: {profile['height']} см\n"
-            f"🎂 Возраст: {profile['age']} лет\n"
-            f"👫 Пол: {gender_text}\n"
-            f"🏃 Активность: {activity_name}\n\n"
-            f"📊 Расчёты:\n"
+            f"Ваш профиль\n\n"
+            f"Имя: {profile['name']}\n"
+            f"Вес: {profile['weight']} кг\n"
+            f"Рост: {profile['height']} см\n"
+            f"Возраст: {profile['age']} лет\n"
+            f"Пол: {gender_text}\n"
+            f"Активность: {activity_name}\n\n"
+            f"Расчёты:\n"
             f"Базовый метаболизм (BMR): {bmr:.0f} ккал\n"
             f"Суточная норма (TDEE): {tdee:.0f} ккал\n\n"
             f"Чтобы изменить данные, используйте /profile_edit"
         )
     else:
         await message.answer(
-            "👋 Давайте познакомимся!\n\n"
+            "Давайте познакомимся!\n\n"
             "Как вас зовут? (напишите имя)"
         )
         await state.set_state(ProfileState.waiting_for_name)
@@ -649,13 +764,13 @@ async def process_profile_activity(callback: types.CallbackQuery, state: FSMCont
     tdee = user_db.calculate_tdee(data)
     
     await callback.message.edit_text(
-        f"✅ Профиль сохранён!\n\n"
-        f"👤 Имя: {data['name']}\n"
-        f"🎂 Возраст: {data['age']} лет\n"
-        f"⚖️ Вес: {data['weight']} кг\n"
-        f"📏 Рост: {data['height']} см\n"
-        f"🏃 Активность: {ACTIVITY_LEVELS[activity_level]['name']}\n\n"
-        f"📊 Ваша суточная норма калорий: {tdee:.0f} ккал\n\n"
+        f"Профиль сохранён!\n\n"
+        f"Имя: {data['name']}\n"
+        f"Возраст: {data['age']} лет\n"
+        f"Вес: {data['weight']} кг\n"
+        f"Рост: {data['height']} см\n"
+        f"Активность: {ACTIVITY_LEVELS[activity_level]['name']}\n\n"
+        f"Ваша суточная норма калорий: {tdee:.0f} ккал\n\n"
         f"Теперь статистика будет показывать процент от нормы!"
     )
     await state.clear()
@@ -686,7 +801,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         
         if referral_code:
             await message.answer(
-                "🎉 Добро пожаловать!\n\n"
+                "Добро пожаловать!\n\n"
                 "Вы перешли по реферальной ссылке и получили +3 дня к тестовому периоду!"
             )
     
@@ -696,7 +811,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     welcome_text = f"FoodTracker Bot\n\nПросто напишите, что съели — я всё посчитаю!\n\nСтатус подписки: {format_subscription_status(subscription)}"
     
     if not profile:
-        welcome_text += "\n\n👋 Давайте познакомимся!\nЗаполните профиль, чтобы я мог рассчитывать вашу суточную норму калорий.\n\nИспользуйте команду /profile для настройки."
+        welcome_text += "\n\nДавайте познакомимся!\nЗаполните профиль, чтобы я мог рассчитывать вашу суточную норму калорий.\n\nИспользуйте команду /profile для настройки."
     
     await message.answer(welcome_text)
 
@@ -790,10 +905,10 @@ async def handle_correction(message: types.Message, state: FSMContext):
         profile = user_db.get_profile(message.from_user.id)
         tdee = user_db.calculate_tdee(profile) if profile else None
         
-        response = f"✅ Сохранено!\n\n{format_daily_stats(stats, tdee)}"
+        response = f"Сохранено!\n\n{format_daily_stats(stats, tdee)}"
         
         if not has_profile(message.from_user.id):
-            response += "\n\n📝 Если мы познакомимся, то я могу давать больше информации.\nИспользуйте команду /profile для настройки."
+            response += "\n\nЕсли мы познакомимся, то я могу давать больше информации.\nИспользуйте команду /profile для настройки."
         
         await message.answer(response)
         await state.clear()
@@ -839,7 +954,7 @@ async def handle_correction(message: types.Message, state: FSMContext):
                 carbs = p.get("carbs", 0)
                 lines.append(f"{name} - {weight}г, К {cal:.0f}, Б {prot:.1f}, Ж {fat:.1f}, У {carbs:.1f}")
             
-            result_text = "🔄 Обновлено:\n\n" + "\n".join(lines)
+            result_text = "Обновлено:\n\n" + "\n".join(lines)
             result_text += f"\n\nИТОГО: {total['calories']:.0f} ккал | Б: {total['protein']:.1f}г | Ж: {total['fat']:.1f}г | У: {total['carbs']:.1f}г"
             result_text += "\n\nЗаписываю?"
             
@@ -853,7 +968,7 @@ async def handle_correction(message: types.Message, state: FSMContext):
         return
     
     if is_correction(user_text_lower):
-        waiting_msg = await message.answer("🔄 Пересчитываю...")
+        waiting_msg = await message.answer("Пересчитываю...")
         result = await food_search.parse_and_calculate(user_text)
         await waiting_msg.delete()
         
@@ -878,7 +993,7 @@ async def handle_correction(message: types.Message, state: FSMContext):
             carbs = p.get("carbs", 0)
             lines.append(f"{name} - {weight}г, К {cal:.0f}, Б {prot:.1f}, Ж {fat:.1f}, У {carbs:.1f}")
         
-        result_text = "🔄 Обновлено:\n\n" + "\n".join(lines)
+        result_text = "Обновлено:\n\n" + "\n".join(lines)
         result_text += f"\n\nИТОГО: {total['calories']:.0f} ккал | Б: {total['protein']:.1f}г | Ж: {total['fat']:.1f}г | У: {total['carbs']:.1f}г"
         result_text += "\n\nЗаписываю?"
         
