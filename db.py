@@ -149,7 +149,7 @@ class UserDB:
                         ''', (referrer_id, user_id, link_code))
                         
                         if bonus_months and bonus_months > 0:
-                            self._add_bonus_months_to_user(referrer_id, bonus_months))
+                            self._add_bonus_months_to_user(referrer_id, bonus_months)
             
             trial_end = (datetime.now() + timedelta(days=TRIAL_DAYS + extra_days)).date().isoformat()
             cursor.execute(
